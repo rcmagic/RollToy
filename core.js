@@ -9,8 +9,16 @@ var canAdvance = true;
 var port = 8080;
 var remoteClient;
 
+
 // The number of frames we can advance before we wait for the remote client's state
 var maxDiff = 5;
+
+// Keep track of the local client and remote client's input.  
+// We send a buffer of inputs, so each client can play catchup if either gets more than 1 frame behind the other.
+var remoteInput = new Buffer(maxDiff);
+var localInput = new Buffer(maxDiff);
+for(var i=0; i<maxDiff; i++) localInput.writeUInt8(0x0, i);
+
 function advance(frameCount) {
 	frame += frameCount;
 }
@@ -25,10 +33,13 @@ function restoreState() {
 
 function sendState() {
 	if(!remoteClient) return;
-	var buf = new Buffer(5);
+	var buf = new Buffer(5+maxDiff);
 	buf[0] = 0x72; // r
 
 	buf.writeUInt32BE(frame, 1);
+	for(var i=0; i<maxDiff; i++) {
+		buf.writeUInt8(localInput[i],5+i);
+	}
 	server.send(buf, 0, buf.length, remoteClient.port, remoteClient.address, function(err, bytes) {
 		if(err) { 
 			"An error occured: " + err; 
@@ -88,7 +99,7 @@ exports.createServer = function () {
 				}
 			});
 
-		} else if(msg.length == 5 && msg[0] == 0x72) {
+		} else if(msg.length == 5+maxDiff && msg[0] == 0x72) {
 			theirFrame = msg.readUInt32BE(1);
 			console.log("Got frame: " + theirFrame);
 			if(theirFrame > storedFrame) {
@@ -121,9 +132,14 @@ exports.createClient = function () {
 		if(msg == "confirmed") {
 			console.log("Server confirmed connection");
 			remoteClient = rinfo;
-		} else if(msg.length == 5 && msg[0] == 0x72) {
+		} else if(msg.length == 5+maxDiff && msg[0] == 0x72) {
 			theirFrame = msg.readUInt32BE(1);
-			console.log("Got frame: " + theirFrame);
+			var bufString = "Received: " theirFrame + ': [';
+			for(var i = 0; i < maxDiff; i++) {
+				bufString += msg.readUInt8(5+i) + ' ';
+			}
+			bufString += ']';
+			console.log(bufString);
 			if(theirFrame > storedFrame) {
 				console.log("Rollback! to " + storedFrame);
 				rollBack();
