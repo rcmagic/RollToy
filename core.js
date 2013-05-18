@@ -127,20 +127,8 @@ exports.createServer = function () {
 					server.close(); 
 				}
 			});
-
-		} else if(msg.length == 5+maxDiff && msg[0] == 0x72) {
-			theirFrame = msg.readUInt32BE(1);
-			var bufString = "Received: " + theirFrame + ': [';
-			for(var i = 0; i < maxDiff; i++) {
-				bufString += msg.readUInt8(5+i) + ' ';
-				remoteInput[i] = msg.readUInt8(5+i);
-			}
-			bufString += ']';
-			console.log(bufString);
-			if(theirFrame > storedFrame) {
-				console.log("Rollback! to " + storedFrame);
-				rollBack();
-			}
+		} else {
+			handleMessage(msg);
 		}
 	});
 
@@ -167,21 +155,26 @@ exports.createClient = function () {
 		if(msg == "confirmed") {
 			console.log("Server confirmed connection");
 			remoteClient = rinfo;
-		} else if(msg.length == 5+maxDiff && msg[0] == 0x72) {
-			theirFrame = msg.readUInt32BE(1);
-			var bufString = "Received: " + theirFrame + ': [';
-			for(var i = 0; i < maxDiff; i++) {
-				bufString += msg.readUInt8(5+i) + ' ';
-				remoteInput[i] = msg.readUInt8(5+i);
-			}
-			bufString += ']';
-			console.log(bufString);
-			if(theirFrame > storedFrame) {
-				console.log("Rollback! to " + storedFrame);
-				rollBack();
-			}
+		} else {
+			handleMessage(msg);
 		}
 	});
 }
 
+function handleMessage(msg) {
+	if(msg.length == 5+maxDiff && msg[0] == 0x72) {
+		theirFrame = msg.readUInt32BE(1);
+		var bufString = "Received: " + theirFrame + ': [';
+		for(var i = 0; i < maxDiff; i++) {
+			bufString += msg.readUInt8(5+i) + ' ';
+			remoteInput[i] = msg.readUInt8(5+i);
+		}
+		bufString += ']';
+		console.log(bufString);
+		if(theirFrame > storedFrame) {
+			console.log("Rollback! to " + storedFrame);
+			rollBack();
+		}
+	}
+}
 
