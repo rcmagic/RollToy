@@ -3,6 +3,11 @@ var server = dgram.createSocket("udp4");
 
 
 var frame = 0;
+
+// The only state for now that will test is a simple integer
+var state = 0;
+var storedState = 0;
+
 var theirFrame = 0;
 var storedFrame = 0;
 var canAdvance = true;
@@ -15,20 +20,34 @@ var maxDiff = 5;
 
 // Keep track of the local client and remote client's input.  
 // We send a buffer of inputs, so each client can play catchup if either gets more than 1 frame behind the other.
-var remoteInput = new Buffer(maxDiff);
-var localInput = new Buffer(maxDiff);
-for(var i=0; i<maxDiff; i++) localInput.writeUInt8(0x0, i);
+var remoteInput = new Array(5); //new Buffer(maxDiff);
+var localInput = new Array(5); //new Buffer(maxDiff);
+for(var i=0; i<maxDiff; i++) localInput[i] = 0;
 
-function advance(frameCount) {
-	frame += frameCount;
+// Transition into the next state
+function advance(p1Input, p2Input) {
+	frame += 1;
+
+	// Simple deterministic state transition
+	state = p1Input + p2Input;
+
+
+}
+
+function updateInput() {
+	localInput.shift();
+	// Inputs are a random number in the range [0,255]
+	localInput.push(Math.floor(Math.random()*256));
 }
 
 function storeState() {
 	storedFrame = frame;
+    storedState = state;
 }
 
 function restoreState() {
 	frame = storedFrame;
+    state = storedState;
 }
 
 function sendState() {
@@ -52,17 +71,26 @@ function rollBack() {
 	// determine how many frames to advance forward
 	var frameCount = Math.min(frame, theirFrame)-storedFrame;
 	var rollbackFrame = frame;
-	// return to previous state
+
+	// return to previous synced state
 	restoreState();
+
 	// advance up to the remote client's frame or if great than our last frame to that.
-	advance(frameCount);
+	for(var i = 0; i < frameCount; i++) {
+		advance(localInput[maxDiff-1-rollbackFrame-storedFrame+i], remoteInput[maxDiff-1-theirFrame-storedFrame+i]);
+	}
+
+	// Store the last synced state
 	storeState();
 
-	// advance back to where we were
-	advance(rollbackFrame-frame);
+	var leftFrames = rollbackFrame - frame;
+	// advance back to the future
+	for(var i = 0; i < leftFrames; i++) {
+		// Holding the last input from the remote client.
+		advance(localInput[maxDiff-leftFrames+i-1], remoteInput[maxDiff-1]);
+	}
 
 	console.log("Sending State: " + frame);
-
 	sendState();
 }
 
@@ -72,7 +100,8 @@ console.log("Starting timer");
 setInterval(function() {
 	// Do not want to move too far forward, or roll backs will become very sudden.
 	if(canAdvance) {
-		frame += 1;
+		updateInput();
+		advance(1);
 		console.log("Frame Advance: " + frame);
 		sendState();
 	}
@@ -101,7 +130,13 @@ exports.createServer = function () {
 
 		} else if(msg.length == 5+maxDiff && msg[0] == 0x72) {
 			theirFrame = msg.readUInt32BE(1);
-			console.log("Got frame: " + theirFrame);
+			var bufString = "Received: " + theirFrame + ': [';
+			for(var i = 0; i < maxDiff; i++) {
+				bufString += msg.readUInt8(5+i) + ' ';
+				remoteInput[i] = msg.readUInt8(5+i);
+			}
+			bufString += ']';
+			console.log(bufString);
 			if(theirFrame > storedFrame) {
 				console.log("Rollback! to " + storedFrame);
 				rollBack();
@@ -134,9 +169,10 @@ exports.createClient = function () {
 			remoteClient = rinfo;
 		} else if(msg.length == 5+maxDiff && msg[0] == 0x72) {
 			theirFrame = msg.readUInt32BE(1);
-			var bufString = "Received: " theirFrame + ': [';
+			var bufString = "Received: " + theirFrame + ': [';
 			for(var i = 0; i < maxDiff; i++) {
 				bufString += msg.readUInt8(5+i) + ' ';
+				remoteInput[i] = msg.readUInt8(5+i);
 			}
 			bufString += ']';
 			console.log(bufString);
