@@ -10,3 +10,7 @@ Start the server with:
 
 Then run the client.
 >node client.js
+
+To run the RollToy tests, first you'll need nodeunit https://github.com/caolan/nodeunit
+Then run:
+> nodeunit test/core.test.js
