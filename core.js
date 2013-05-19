@@ -26,10 +26,11 @@ for(var i=0; i<maxDiff; i++) localInput[i] = 0;
 
 // Transition into the next state
 function advance(p1Input, p2Input) {
+	console.log(p1Input + ', ' + p2Input);
 	frame += 1;
 
 	// Simple deterministic state transition
-	state = p1Input + p2Input;
+	state += p1Input + p2Input;
 
 
 }
@@ -67,17 +68,22 @@ function sendState() {
 	});
 }
 
+// Rerun inputs from the remote client and local client since the last synced state
+// Note: This function is only defined for frame-storedFrame <= maxDiff and theirFrame-storedFrame <= maxDiff
 function rollBack() {
-	// determine how many frames to advance forward
+	console.log("Roll: " + frame);
+	// Determine the number of frames we can advance forward and maintain a synced state
 	var frameCount = Math.min(frame, theirFrame)-storedFrame;
 	var rollbackFrame = frame;
 
 	// return to previous synced state
 	restoreState();
 
-	// advance up to the remote client's frame or if great than our last frame to that.
+	// Advance forward using the remote and local input, resulting in a synced state
 	for(var i = 0; i < frameCount; i++) {
-		advance(localInput[maxDiff-1-rollbackFrame-storedFrame+i], remoteInput[maxDiff-1-theirFrame-storedFrame+i]);
+		var offset = maxDiff-(rollbackFrame-storedFrame)+i;
+		var theirOffset = maxDiff-(theirFrame-storedFrame)+i;
+		advance(localInput[offset], remoteInput[theirOffset]);
 	}
 
 	// Store the last synced state
@@ -87,29 +93,35 @@ function rollBack() {
 	// advance back to the future
 	for(var i = 0; i < leftFrames; i++) {
 		// Holding the last input from the remote client.
-		advance(localInput[maxDiff-leftFrames+i-1], remoteInput[maxDiff-1]);
+		advance(localInput[maxDiff-leftFrames+i], remoteInput[maxDiff-1]);
 	}
 
 	console.log("Sending State: " + frame);
 	sendState();
 }
+exports.rollBack = rollBack;
 
 console.log("Starting timer");
 
-// Set callback for every 2 seconds
-setInterval(function() {
-	// Do not want to move too far forward, or roll backs will become very sudden.
-	if(canAdvance) {
-		updateInput();
-		advance(1);
-		console.log("Frame Advance: " + frame);
-		sendState();
-	}
 
-	if(frame - storedFrame >= maxDiff) {
-		canAdvance = false;
-	}
-}, 2000);
+// Begin calling the game's advance() method to update state on a fixed interval
+function beginUpdates() {
+	// Set callback for every 2 seconds
+	setInterval(function() {
+		// Do not want to move too far forward, or roll backs will become very sudden.
+		if(canAdvance) {
+			updateInput();
+			// TODO: repeat the last from of remote input, or use remote input if available
+			advance(localInput[maxDiff-1], 0);
+			console.log("Frame Advance: " + frame);
+			sendState();
+		}
+
+		if(frame - storedFrame >= maxDiff) {
+			canAdvance = false;
+		}
+	}, 2000);	
+}
 
 // Server stuff
 exports.createServer = function () {
@@ -127,6 +139,8 @@ exports.createServer = function () {
 					server.close(); 
 				}
 			});
+			beginUpdates();
+
 		} else {
 			handleMessage(msg);
 		}
@@ -155,6 +169,7 @@ exports.createClient = function () {
 		if(msg == "confirmed") {
 			console.log("Server confirmed connection");
 			remoteClient = rinfo;
+			beginUpdates();
 		} else {
 			handleMessage(msg);
 		}
@@ -178,3 +193,29 @@ function handleMessage(msg) {
 	}
 }
 
+exports.setFrame = function(pFrame) {
+	frame = pFrame;
+}
+
+// Function for setting up private state for testing
+exports.setData = function(stateInfo) {
+	frame = stateInfo.frame;
+	state = stateInfo.state;
+	storedState = stateInfo.storedState;
+	theirFrame = stateInfo.theirFrame;
+	storedFrame = stateInfo.storedFrame;
+	localInput = stateInfo.localInput;
+	remoteInput = stateInfo.remoteInput;
+}
+
+exports.getData = function() {
+	return {
+		frame: frame,
+		state: state,
+		storedState: storedState,
+		storedFrame: storedFrame,
+		theirFrame: theirFrame,
+		localInput: localInput,
+		remoteInput: remoteInput
+	};
+}
