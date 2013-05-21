@@ -13,6 +13,7 @@ var storedFrame = 0;
 var canAdvance = true;
 var port = 8080;
 var remoteClient;
+var delay = 0;
 
 
 // The number of frames we can advance before we wait for the remote client's state
@@ -20,13 +21,13 @@ var maxDiff = 5;
 
 // Keep track of the local client and remote client's input.  
 // We send a buffer of inputs, so each client can play catchup if either gets more than 1 frame behind the other.
-var remoteInput = new Array(5); //new Buffer(maxDiff);
-var localInput = new Array(5); //new Buffer(maxDiff);
-for(var i=0; i<maxDiff; i++) localInput[i] = 0;
+var remoteInput = new Array(maxDiff+delay); //new Buffer(maxDiff);
+var localInput = new Array(maxDiff+delay); //new Buffer(maxDiff);
+for(var i=0; i<maxDiff+delay; i++) localInput[i] = 0;
 
 // Transition into the next state
 function advance(p1Input, p2Input) {
-	console.log(p1Input + ', ' + p2Input);
+	// console.log(p1Input + ', ' + p2Input);
 	frame += 1;
 
 	// Simple deterministic state transition
@@ -53,11 +54,11 @@ function restoreState() {
 
 function sendState() {
 	if(!remoteClient) return;
-	var buf = new Buffer(5+maxDiff);
+	var buf = new Buffer(5+maxDiff+delay);
 	buf[0] = 0x72; // r
 
 	buf.writeUInt32BE(frame, 1);
-	for(var i=0; i<maxDiff; i++) {
+	for(var i=0; i<maxDiff+delay; i++) {
 		buf.writeUInt8(localInput[i],5+i);
 	}
 	server.send(buf, 0, buf.length, remoteClient.port, remoteClient.address, function(err, bytes) {
@@ -71,7 +72,6 @@ function sendState() {
 // Rerun inputs from the remote client and local client since the last synced state
 // Note: This function is only defined for frame-storedFrame <= maxDiff and theirFrame-storedFrame <= maxDiff
 function rollBack() {
-	console.log("Roll: " + frame);
 	// Determine the number of frames we can advance forward and maintain a synced state
 	var frameCount = Math.min(frame, theirFrame)-storedFrame;
 	var rollbackFrame = frame;
@@ -93,10 +93,10 @@ function rollBack() {
 	// advance back to the future
 	for(var i = 0; i < leftFrames; i++) {
 		// Holding the last input from the remote client.
-		advance(localInput[maxDiff-leftFrames+i], remoteInput[maxDiff-1]);
+		advance(localInput[maxDiff-leftFrames+i-delay], remoteInput[maxDiff-1]);
 	}
 
-	console.log("Sending State: " + frame);
+	// console.log("Sending State: " + frame);
 	sendState();
 }
 exports.rollBack = rollBack;
@@ -112,7 +112,7 @@ function beginUpdates() {
 		if(canAdvance) {
 			updateInput();
 			// TODO: repeat the last from of remote input, or use remote input if available
-			advance(localInput[maxDiff-1], 0);
+			advance(localInput[maxDiff-1-delay], 0);
 			console.log("Frame Advance: " + frame);
 			sendState();
 		}
@@ -206,6 +206,7 @@ exports.setData = function(stateInfo) {
 	storedFrame = stateInfo.storedFrame;
 	localInput = stateInfo.localInput;
 	remoteInput = stateInfo.remoteInput;
+	delay = stateInfo.delay;
 }
 
 exports.getData = function() {
@@ -216,6 +217,7 @@ exports.getData = function() {
 		storedFrame: storedFrame,
 		theirFrame: theirFrame,
 		localInput: localInput,
-		remoteInput: remoteInput
+		remoteInput: remoteInput,
+		delay: delay
 	};
 }
